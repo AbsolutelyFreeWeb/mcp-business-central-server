@@ -1,164 +1,68 @@
-# Business Central MCP Server
+# mcp-business-central-server
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+MCP server for Microsoft Dynamics 365 Business Central. This repository holds **two independent
+implementations** in separate folders — they do not share code.
 
-A lightweight MCP Server for seamless integration with Microsoft Dynamics 365 Business Central, enabling MCP clients to interact with any entity in your Business Central environment. Developed by [sofias tech](https://github.com/xxx/mcp-business-central-server/).
+| | [`typescript/`](typescript/) | [`python/`](python/) |
+| --- | --- | --- |
+| Status | **Current — use this one** | Legacy (original upstream implementation) |
+| Package | `bc-mcp-server` (Node 20+) | `mcp-business-central-server` (Python 3.10+) |
+| Auth | OAuth 2.0 client credentials, or Basic | **Basic only** |
+| Works against BC online (SaaS) | Yes | **No** — see below |
+| Works against BC on-premises | Yes | Yes |
+| BC endpoint style | `api/v2.0` **and** `ODataV4` (selectable) | `ODataV4` only |
+| Transports | stdio + HTTP | stdio |
+| Tests | vitest | none |
 
-## Features
+## Which one to use
 
-This server provides a clean interface to Business Central resources through the Model Context Protocol (MCP), with optimized HTTP request handling for improved performance.
+Use **`typescript/`**. It is a functional superset: it supports both OAuth and Basic auth, adds an
+HTTP transport, `$metadata` caching, request timeouts, read-only and write-confirmation guards, and
+has tests.
 
-### Tools
+`python/` is kept for reference only. **It cannot authenticate to Business Central online**:
+Microsoft removed Web Service Access Keys (Basic auth) for BC online after October 1, 2022, and
+OAuth2 is now the only option for SaaS. It remains usable against on-premises deployments.
+See [Deprecated features in the platform](https://learn.microsoft.com/dynamics365/business-central/dev-itpro/upgrade/deprecated-features-platform#accesskeys).
 
-The server implements the following tools:
+## Reaching tables that have no API page
 
-- `BC_Get_Schema`: Retrieves the schema of any Business Central entity including available fields
-- `BC_List_Items`: Fetches a list of entities with optional filtering and pagination
-- `BC_Get_Items_By_Field`: Searches for entities based on a specific field value
-- `BC_Create_Item`: Creates a new entity record in Business Central
-- `BC_Update_Item`: Updates an existing entity record
-- `BC_Delete_Item`: Removes an entity record from Business Central
+`api/v2.0` only exposes API pages and API queries, so ISV and customer-specific tables are
+invisible to it unless someone writes an API page for each one. The `ODataV4` endpoint has no such
+limit: **anything published on Business Central's *Web Services* page** — pages and queries (plus
+codeunits as unbound actions) — is reachable, with no AL code at all.
 
-## Working with Business Central Entities
+`typescript/` supports both. Point `BC_BASE_URL` at an `/ODataV4` root and the endpoint style is
+detected automatically (override with `BC_ENDPOINT_STYLE=api|odata`):
 
-This server can work with any entity (table) in Business Central. When using the tools, you must provide the exact entity name as it appears in Business Central. For example:
+```
+https://api.businesscentral.dynamics.com/v2.0/{tenant}/{environment}/ODataV4
+https://bc.contoso.local:7048/BC/ODataV4
+```
 
-- `Employees`
-- `Customers`
-- `Items`
-- `Vendors`
-- `SalesOrders`
-- `Payments`
+To expose a table this way, in Business Central open **Web Services**, add a row with Object Type
+`Page` (or `Query`), pick the object, set a **Service Name**, and tick **Published**. That Service
+Name — not the object name — is what you pass as `entitySet`. Microsoft's guidance is to use
+singular PascalCase with no spaces, e.g. `CSMAutomation`.
 
-The entity name is case-sensitive and must match exactly what Business Central exposes through its API.
+Three differences to expect on the OData style:
 
-## Architecture
-
-The server is built with resource efficiency in mind:
-
-- Clear separation between resource management and tool implementation
-- Simple and maintainable codebase with minimal code duplication
-- Direct HTTP request handling using requests library
+- **Company** is `Company(Id={guid})` or `Company('{Name}')`. The name is case-sensitive and cannot
+  be resolved server-side there, so prefer the GUID; `bc_list_companies` may be unavailable and
+  returns actionable guidance if so.
+- **Keys** are the page's `ODataKeyFields`, not systemId GUIDs — usually a quoted string, e.g.
+  `bc_get_entity` with `id: "'PRODUCTLISTING'"`, and composite keys are comma-separated.
+- **Field names** come from the page and have spaces replaced by underscores (`Codeunit_ID_Code`),
+  rather than the camelCase of API pages.
 
 ## Setup
 
-1. Create API credentials for Business Central
-2. Configure your Business Central environment and company information
-3. Set up the required environment variables
-
-## Environment Variables
-
-The server requires these environment variables:
-
-- `BC_URL_SERVER`: Your Business Central API server URL (e.g., "https://api.businesscentral.dynamics.com/v2.0/tenant/api/v2.0")
-- `BC_USER`: Your Business Central API username
-- `BC_PASS`: Your Business Central API password
-- `BC_COMPANY`: The name of your Business Central company
-
-## Quickstart
-
-### Installation
-
-```bash
-pip install -e .
-```
-
-Or install from PyPI once published:
-
-```bash
-pip install mcp-business-central-server
-```
-
-Using uv:
-
-```bash
-uv pip install mcp-business-central-server
-```
-
-### Claude Desktop Integration
-
-To integrate with Claude Desktop, update the configuration file:
-
-On Windows: `%APPDATA%/Claude/claude_desktop_config.json`
-On macOS: `~/Library/Application\ Support/Claude/claude_desktop_config.json`
-
-#### Standard Integration
-
-```json
-"mcpServers": {
-  "businesscentral": {
-    "command": "mcp-business-central-server",
-    "env": {
-      "BC_URL_SERVER": "your-bc-api-url",
-      "BC_USER": "your-bc-username",
-      "BC_PASS": "your-bc-password",
-      "BC_COMPANY": "your-bc-company"
-    }
-  }
-}
-```
-
-#### Using uvx
-
-```json
-"mcpServers": {
-  "businesscentral": {
-    "command": "uvx",
-    "args": [
-      "mcp-business-central-server"
-    ],
-    "env": {
-      "BC_URL_SERVER": "your-bc-api-url",
-      "BC_USER": "your-bc-username",
-      "BC_PASS": "your-bc-password",
-      "BC_COMPANY": "your-bc-company"
-    }
-  }
-}
-```
-
-## Development
-
-### Requirements
-
-- Python 3.10+
-- Dependencies listed in `requirements.txt` and `pyproject.toml`
-
-### Local Development
-
-1. Clone the repository
-2. Create a virtual environment:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
-3. Install development dependencies:
-   ```bash
-   pip install -e .
-   ```
-4. Create a `.env` file with your Business Central credentials:
-   ```
-   BC_URL_SERVER=your-bc-api-url
-   BC_USER=your-bc-username
-   BC_PASS=your-bc-password
-   BC_COMPANY=your-bc-company
-   ```
-5. Run the server:
-   ```bash
-   python -m mcp_bc_server
-   ```
-
-### Debugging
-
-For debugging the MCP server, you can use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector):
-
-```bash
-npx @modelcontextprotocol/inspector -- python -m mcp_bc_server
-```
+Each folder is self-contained — see [`typescript/README.md`](typescript/README.md) and
+[`python/README.md`](python/README.md). Both require a Microsoft Entra app registration with a
+matching entry on the Business Central **Microsoft Entra Applications** page when used against SaaS.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-Copyright (c) 2025 sofias tech
-
+MIT — see [LICENSE](LICENSE). Forked from
+[luisMDev/mcp-business-central-server](https://github.com/luisMDev/mcp-business-central-server);
+the Python implementation originates from sofias tech.
